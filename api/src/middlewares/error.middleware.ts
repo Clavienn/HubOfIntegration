@@ -1,5 +1,5 @@
 // src/middleware/error.middleware.ts
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import { ApiError } from '../types';
 import logger from '../utils/logger';
 
@@ -21,7 +21,6 @@ export const errorHandler = (
   err: Error | AppError,
   req: Request,
   res: Response,
-  next: NextFunction
 ): void => {
   logger.error('Error occurred:', {
     error: err.message,

@@ -1,6 +1,7 @@
 // src/controllers/route.controller.ts
 import { Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
 import { RouteModel } from '../models/Route';
 import { SystemModel } from '../models/System';
 import { AppError } from '../middlewares/error.middleware';
@@ -8,6 +9,35 @@ import { Route } from '../types';
 import logger from '../utils/logger';
 
 export class RouteController {
+  /**
+   * Helper function to find a route by either id (UUID) or _id (MongoDB ObjectId)
+   */
+  private async findRouteById(routeId: string): Promise<any | null> {
+    // Si c'est un ObjectId MongoDB valide
+    if (mongoose.Types.ObjectId.isValid(routeId)) {
+      // Chercher par _id
+      const route = await RouteModel.findById(routeId);
+      if (route) return route;
+    }
+    
+    // Chercher par le champ id (UUID)
+    return await RouteModel.findOne({ id: routeId });
+  }
+
+  /**
+   * Helper function to find a system by either id (UUID) or _id (MongoDB ObjectId)
+   */
+  private async findSystemById(systemId: string): Promise<any | null> {
+    // Si c'est un ObjectId MongoDB valide
+    if (mongoose.Types.ObjectId.isValid(systemId)) {
+      const system = await SystemModel.findById(systemId);
+      if (system) return system;
+    }
+    
+    // Chercher par le champ id (UUID)
+    return await SystemModel.findOne({ id: systemId });
+  }
+
   public async createRoute(
     req: Request<{}, {}, Omit<Route, 'id' | 'createdAt' | 'updatedAt'>>,
     res: Response
@@ -15,13 +45,13 @@ export class RouteController {
     const { name, sourceSystemId, destinationSystemId, transformationId, condition, priority, isActive } = req.body;
 
     // Verify source system exists
-    const sourceSystem = await SystemModel.findOne({ id: sourceSystemId });
+    const sourceSystem = await this.findSystemById(sourceSystemId);
     if (!sourceSystem) {
       throw new AppError('SOURCE_NOT_FOUND', `Source system ${sourceSystemId} not found`, 404);
     }
 
     // Verify destination system exists
-    const destinationSystem = await SystemModel.findOne({ id: destinationSystemId });
+    const destinationSystem = await this.findSystemById(destinationSystemId);
     if (!destinationSystem) {
       throw new AppError('DESTINATION_NOT_FOUND', `Destination system ${destinationSystemId} not found`, 404);
     }
@@ -31,15 +61,15 @@ export class RouteController {
     const route = await RouteModel.create({
       id: routeId,
       name,
-      sourceSystemId,
-      destinationSystemId,
+      sourceSystemId: sourceSystem._id.toString(),
+      destinationSystemId: destinationSystem._id.toString(),
       transformationId,
       condition,
       priority: priority || 0,
       isActive: isActive ?? true,
     });
 
-    logger.info(`Route created: ${name} (${routeId}) from ${sourceSystemId} to ${destinationSystemId}`);
+    logger.info(`Route created: ${name} (${routeId}) from ${sourceSystem.name} to ${destinationSystem.name}`);
 
     res.status(201).json(route);
   }
@@ -68,7 +98,7 @@ export class RouteController {
   ): Promise<void> {
     const { id } = req.params;
 
-    const route = await RouteModel.findOne({ id });
+    const route = await this.findRouteById(id);
 
     if (!route) {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
@@ -84,7 +114,7 @@ export class RouteController {
     const { id } = req.params;
     const { name, transformationId, condition, priority, isActive } = req.body;
 
-    const route = await RouteModel.findOne({ id });
+    const route = await this.findRouteById(id);
 
     if (!route) {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
@@ -109,7 +139,7 @@ export class RouteController {
   ): Promise<void> {
     const { id } = req.params;
 
-    const route = await RouteModel.findOne({ id });
+    const route = await this.findRouteById(id);
 
     if (!route) {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
@@ -128,7 +158,7 @@ export class RouteController {
   ): Promise<void> {
     const { id } = req.params;
 
-    const route = await RouteModel.findOne({ id });
+    const route = await this.findRouteById(id);
 
     if (!route) {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
@@ -137,7 +167,7 @@ export class RouteController {
     route.isActive = true;
     await route.save();
 
-    res.json({ id: route.id, isActive: true });
+    res.json({ id: route._id, isActive: true });
   }
 
   public async disableRoute(
@@ -146,7 +176,7 @@ export class RouteController {
   ): Promise<void> {
     const { id } = req.params;
 
-    const route = await RouteModel.findOne({ id });
+    const route = await this.findRouteById(id);
 
     if (!route) {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
@@ -155,6 +185,6 @@ export class RouteController {
     route.isActive = false;
     await route.save();
 
-    res.json({ id: route.id, isActive: false });
+    res.json({ id: route._id, isActive: false });
   }
-}   
+}

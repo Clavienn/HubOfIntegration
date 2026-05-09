@@ -1,87 +1,149 @@
-// src/controllers/message.controller.ts
+// src/controllers/ingest.controller.ts
 import { Request, Response } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import mongoose from 'mongoose';
+import { AuthRequest } from '../middlewares/auth.middleware';
 import { MessageModel } from '../models/Message';
+import { SystemModel } from '../models/System';
+import QueueService from '../services/queue.service';
+import WebhookService from '../services/webhook.service';
+import RouterService from '../services/router.service';
+import { IngestRequest, IngestResponse, MessageStatus } from '../types';
 import { AppError } from '../middlewares/error.middleware';
-import { MessageStatus, MessageQueryFilters } from '../types';
+import logger from '../utils/logger';
 
-export class MessageController {
-  public async getMessages(
-    req: Request<
-      {},
-      {},
-      {},
-      {
-        limit?: string;
-        offset?: string;
-        status?: MessageStatus;
-        sourceSystemId?: string;
-        destinationSystemId?: string;
-        fromDate?: string;
-        toDate?: string;
-      }
-    >,
-    res: Response
-  ): Promise<void> {
-    const limit = Math.min(parseInt(req.query.limit || '50'), 100);
-    const offset = parseInt(req.query.offset || '0');
-    
-    const query: MessageQueryFilters = {};
-    
-    if (req.query.status) {
-      query.status = req.query.status;
-    }
-    
-    if (req.query.sourceSystemId) {
-      query['metadata.sourceSystemId'] = req.query.sourceSystemId;
-    }
-    
-    if (req.query.destinationSystemId) {
-      query['metadata.destinationSystemId'] = req.query.destinationSystemId;
-    }
-    
-    // CORRECTION: Construction correcte du filtre de dates
-    if (req.query.fromDate || req.query.toDate) {
-      const dateFilter: { $gte?: Date; $lte?: Date } = {};
-      
-      if (req.query.fromDate) {
-        const fromDate = new Date(req.query.fromDate);
-        if (!isNaN(fromDate.getTime())) {
-          dateFilter.$gte = fromDate;
-        }
-      }
-      
-      if (req.query.toDate) {
-        const toDate = new Date(req.query.toDate);
-        if (!isNaN(toDate.getTime())) {
-          dateFilter.$lte = toDate;
-        }
-      }
-      
-      if (Object.keys(dateFilter).length > 0) {
-        query.createdAt = dateFilter;
-      }
-    }
+export class IngestController {
+  private routerService: RouterService;
 
-    const [messages, total] = await Promise.all([
-      MessageModel.find(query)
-        .sort({ createdAt: -1 })
-        .skip(offset)
-        .limit(limit),
-      MessageModel.countDocuments(query),
-    ]);
-
-    res.json({
-      messages,
-      pagination: {
-        limit,
-        offset,
-        total,
-        hasMore: offset + limit < total,
-      },
-    });
+  constructor() {
+    this.routerService = RouterService.getInstance();
   }
 
-  public async getMessageById(
+  /**
+   * Helper function to find a system by either id (UUID) or _id (MongoDB ObjectId)
+   */
+  private async findSystemById(systemId: string): Promise<any | null> {
+    if (!systemId) return null;
+    
+    // Si c'est un ObjectId MongoDB valide
+    if (mongoose.Types.ObjectId.isValid(systemId)) {
+      const system = await SystemModel.findById(systemId);
+      if (system) return system;
+    }
+    
+    // Chercher par le champ id (UUID)
+    return await SystemModel.findOne({ id: systemId });
+  }
+
+  public async ingest(
+    req: AuthRequest,
+    res: Response
+  ): Promise<void> {
+    const { payload, destinationSystemId, correlationId }: IngestRequest = req.body;
+    
+    // Utiliser l'ID du système depuis l'authentification
+    const sourceSystemId = req.systemId;
+    
+    if (!sourceSystemId) {
+      throw new AppError('UNAUTHORIZED', 'Source system not identified', 401);
+    }
+
+    const messageId = correlationId || uuidv4();
+
+    try {
+      // Get source system configuration
+      const sourceSystem = await this.findSystemById(sourceSystemId);
+      if (!sourceSystem) {
+        throw new AppError('SYSTEM_NOT_FOUND', `Source system ${sourceSystemId} not found`, 404);
+      }
+
+      logger.info(`Processing message from system: ${sourceSystem.name} (${sourceSystemId})`);
+
+      // Determine destination system
+      let finalDestinationSystemId = destinationSystemId || null;
+      
+      if (!finalDestinationSystemId) {
+        finalDestinationSystemId = await this.routerService.getDestinationForMessage(
+          sourceSystemId,
+          payload
+        );
+      }
+
+      if (!finalDestinationSystemId) {
+        throw new AppError(
+          'NO_ROUTE_FOUND',
+          'No route configured for this message',
+          400
+        );
+      }
+
+      // Verify destination system exists and is active
+      const destinationSystem = await this.findSystemById(finalDestinationSystemId);
+      if (!destinationSystem || !destinationSystem.isActive) {
+        throw new AppError(
+          'DESTINATION_NOT_FOUND',
+          `Destination system ${finalDestinationSystemId} not found or inactive`,
+          404
+        );
+      }
+
+      // Create message record
+      await MessageModel.create({
+        id: messageId,
+        payload,
+        metadata: {
+          sourceSystemId: sourceSystem._id.toString(),
+          destinationSystemId: destinationSystem._id.toString(),
+          messageId,
+          timestamp: new Date(),
+          retryCount: 0,
+        },
+        status: 'pending' as MessageStatus,
+      });
+
+      // Push to queue for processing
+      await QueueService.pushToQueue(messageId);
+
+      // Send webhook notification
+      await WebhookService.sendWebhook(
+        sourceSystemId,
+        'message.received',
+        messageId,
+        payload
+      );
+
+      const response: IngestResponse = {
+        messageId,
+        status: 'pending',
+        timestamp: new Date(),
+      };
+
+      logger.info(`Message ${messageId} ingested from ${sourceSystem.name} to ${destinationSystem.name}`);
+      res.status(202).json(response);
+
+    } catch (error) {
+      logger.error(`Ingest failed for message ${messageId}:`, error);
+      
+      // Save error in message if created
+      const existingMessage = await MessageModel.findOne({ id: messageId });
+      if (existingMessage) {
+        existingMessage.status = 'failed';
+        existingMessage.error = error instanceof Error ? error.message : 'Unknown error';
+        await existingMessage.save();
+      }
+
+      if (error instanceof AppError) {
+        throw error;
+      }
+      throw new AppError(
+        'INGEST_FAILED',
+        error instanceof Error ? error.message : 'Failed to ingest message',
+        500
+      );
+    }
+  }
+
+  public async getMessageStatus(
     req: Request<{ id: string }>,
     res: Response
   ): Promise<void> {
@@ -93,114 +155,50 @@ export class MessageController {
       throw new AppError('MESSAGE_NOT_FOUND', `Message ${id} not found`, 404);
     }
 
-    res.json(message);
-  }
-
-  public async getDeadLetterMessages(
-    req: Request<
-      {},
-      {},
-      {},
-      { limit?: string; offset?: string }
-    >,
-    res: Response
-  ): Promise<void> {
-    const limit = Math.min(parseInt(req.query.limit || '50'), 100);
-    const offset = parseInt(req.query.offset || '0');
-
-    const [messages, total] = await Promise.all([
-      MessageModel.find({ status: 'dead' })
-        .sort({ updatedAt: -1 })
-        .skip(offset)
-        .limit(limit),
-      MessageModel.countDocuments({ status: 'dead' }),
-    ]);
-
     res.json({
-      messages,
-      pagination: {
-        limit,
-        offset,
-        total,
-        hasMore: offset + limit < total,
-      },
+      id: message.id,
+      status: message.status,
+      metadata: message.metadata,
+      error: message.error,
+      createdAt: message.createdAt,
+      updatedAt: message.updatedAt,
     });
   }
 
-  public async getStatistics(
-    req: Request,
+  public async replayMessage(
+    req: Request<{ id: string }>,
     res: Response
   ): Promise<void> {
-    const [
-      totalMessages,
-      successCount,
-      failedCount,
-      pendingCount,
-      processingCount,
-      deadCount,
-    ] = await Promise.all([
-      MessageModel.countDocuments(),
-      MessageModel.countDocuments({ status: 'success' }),
-      MessageModel.countDocuments({ status: 'failed' }),
-      MessageModel.countDocuments({ status: 'pending' }),
-      MessageModel.countDocuments({ status: 'processing' }),
-      MessageModel.countDocuments({ status: 'dead' }),
-    ]);
+    const { id } = req.params;
 
-    // Get last 24 hours activity
-    const last24h = new Date();
-    last24h.setHours(last24h.getHours() - 24);
-    
-    const messagesLast24h = await MessageModel.countDocuments({
-      createdAt: { $gte: last24h },
-    });
+    const message = await MessageModel.findOne({ id });
 
-    // Get success rate for last 24h
-    const successLast24h = await MessageModel.countDocuments({
-      createdAt: { $gte: last24h },
-      status: 'success',
-    });
+    if (!message) {
+      throw new AppError('MESSAGE_NOT_FOUND', `Message ${id} not found`, 404);
+    }
 
-    // Get average processing time
-    const processingTimeAggregation = await MessageModel.aggregate([
-      {
-        $match: {
-          'metadata.processingTime': { $exists: true, $ne: null },
-          status: 'success',
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          avgProcessingTime: { $avg: '$metadata.processingTime' },
-          minProcessingTime: { $min: '$metadata.processingTime' },
-          maxProcessingTime: { $max: '$metadata.processingTime' },
-        },
-      },
-    ]);
+    if (message.status !== 'failed' && message.status !== 'dead') {
+      throw new AppError(
+        'INVALID_STATUS',
+        `Cannot replay message with status ${message.status}`,
+        400
+      );
+    }
 
-    const avgProcessingTime = processingTimeAggregation[0]?.avgProcessingTime || 0;
+    // Reset message
+    message.status = 'pending';
+    message.error = undefined;
+    message.metadata.retryCount = 0;
+    await message.save();
 
+    // Re-queue
+    await QueueService.pushToQueue(id);
+
+    logger.info(`Message ${id} queued for replay`);
     res.json({
-      total: totalMessages,
-      byStatus: {
-        success: successCount,
-        failed: failedCount,
-        pending: pendingCount,
-        processing: processingCount,
-        dead: deadCount,
-      },
-      last24h: {
-        total: messagesLast24h,
-        success: successLast24h,
-        successRate: messagesLast24h > 0 ? (successLast24h / messagesLast24h) * 100 : 0,
-      },
-      performance: {
-        avgProcessingTimeMs: Math.round(avgProcessingTime),
-        minProcessingTimeMs: processingTimeAggregation[0]?.minProcessingTime || 0,
-        maxProcessingTimeMs: processingTimeAggregation[0]?.maxProcessingTime || 0,
-      },
-      overallSuccessRate: totalMessages > 0 ? (successCount / totalMessages) * 100 : 0,
+      messageId: id,
+      status: 'queued_for_replay',
+      timestamp: new Date(),
     });
   }
 }

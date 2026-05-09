@@ -1,36 +1,16 @@
 // src/services/queue.service.ts
-import Redis from 'ioredis';
+import { MessageModel } from '../models/Message';
 import logger from '../utils/logger';
 
 export class QueueService {
   private static instance: QueueService;
-  private redis: Redis;
-  private readonly QUEUE_KEY = 'message:queue';
-  private readonly DLQ_KEY = 'message:deadletter';
-  private readonly PROCESSING_KEY = 'message:processing';
+  private pollingInterval: NodeJS.Timeout | null = null;
+  private isPolling: boolean = false;
+  private readonly BATCH_SIZE = 10;
+  private readonly POLL_INTERVAL_MS = 1000; // 1 seconde
 
   private constructor() {
-    const redisHost = process.env.REDIS_HOST || 'localhost';
-    const redisPort = parseInt(process.env.REDIS_PORT || '6379');
-    const redisPassword = process.env.REDIS_PASSWORD;
-
-    this.redis = new Redis({
-      host: redisHost,
-      port: redisPort,
-      password: redisPassword,
-      retryStrategy: (times: number) => {
-        const delay = Math.min(times * 50, 2000);
-        return delay;
-      },
-    });
-
-    this.redis.on('connect', () => {
-      logger.info('Redis connected successfully');
-    });
-
-    this.redis.on('error', (error: Error) => {
-      logger.error('Redis connection error:', error);
-    });
+    this.startPolling();
   }
 
   public static getInstance(): QueueService {
@@ -40,9 +20,59 @@ export class QueueService {
     return QueueService.instance;
   }
 
+  private startPolling(): void {
+    if (this.pollingInterval) {
+      return;
+    }
+
+    this.pollingInterval = setInterval(async () => {
+      await this.processPendingMessages();
+    }, this.POLL_INTERVAL_MS);
+
+    logger.info('Queue polling service started');
+  }
+
+  private async processPendingMessages(): Promise<void> {
+    if (this.isPolling) {
+      return;
+    }
+
+    this.isPolling = true;
+
+    try {
+      // Trouver les messages en attente
+      const messages = await MessageModel.find({
+        status: 'pending',
+      })
+        .sort({ createdAt: 1 }) // FIFO
+        .limit(this.BATCH_SIZE);
+
+      for (const message of messages) {
+        // Marquer comme en traitement
+        message.status = 'processing';
+        await message.save();
+
+        // Mettre dans une file virtuelle (sera traité par le worker)
+        // Le worker pourra récupérer ces messages via popFromQueue
+        logger.debug(`Message ${message.id} ready for processing`);
+      }
+    } catch (error) {
+      logger.error('Error processing pending messages:', error);
+    } finally {
+      this.isPolling = false;
+    }
+  }
+
   public async pushToQueue(messageId: string): Promise<void> {
     try {
-      await this.redis.lpush(this.QUEUE_KEY, messageId);
+      // Mettre à jour le statut du message
+      await MessageModel.updateOne(
+        { id: messageId },
+        { 
+          status: 'pending',
+          $inc: { 'metadata.retryCount': 0 }
+        }
+      );
       logger.debug(`Message ${messageId} pushed to queue`);
     } catch (error) {
       logger.error('Failed to push message to queue:', error);
@@ -52,58 +82,90 @@ export class QueueService {
 
   public async popFromQueue(): Promise<string | null> {
     try {
-      const messageId = await this.redis.rpop(this.QUEUE_KEY);
-      if (messageId) {
-        await this.redis.sadd(this.PROCESSING_KEY, messageId);
-        logger.debug(`Message ${messageId} popped from queue`);
+      // Chercher un message en attente
+      const message = await MessageModel.findOneAndUpdate(
+        {
+          status: 'pending',
+        },
+        {
+          status: 'processing',
+        },
+        {
+          sort: { createdAt: 1 }, // FIFO
+          new: true,
+        }
+      );
+
+      if (message) {
+        logger.debug(`Message ${message.id} popped from queue`);
+        return message.id;
       }
-      return messageId;
+
+      return null;
     } catch (error) {
       logger.error('Failed to pop message from queue:', error);
-      throw error;
+      return null;
     }
   }
 
   public async moveToDeadLetter(messageId: string, error: string): Promise<void> {
     try {
-      await this.redis.hset(this.DLQ_KEY, messageId, error);
-      await this.removeFromProcessing(messageId);
+      await MessageModel.updateOne(
+        { id: messageId },
+        {
+          status: 'dead',
+          error: error,
+        }
+      );
       logger.warn(`Message ${messageId} moved to dead letter queue: ${error}`);
-    } catch (error) {
-      logger.error('Failed to move message to dead letter:', error);
-      throw error;
+    } catch (err) {
+      logger.error('Failed to move message to dead letter:', err);
     }
   }
 
   public async retryMessage(messageId: string): Promise<void> {
     try {
-      await this.redis.lpush(this.QUEUE_KEY, messageId);
-      await this.redis.hdel(this.DLQ_KEY, messageId);
+      await MessageModel.updateOne(
+        { id: messageId },
+        {
+          status: 'pending',
+          error: undefined,
+          'metadata.retryCount': 0,
+        }
+      );
       logger.info(`Message ${messageId} retried`);
     } catch (error) {
       logger.error('Failed to retry message:', error);
-      throw error;
     }
   }
 
   public async removeFromProcessing(messageId: string): Promise<void> {
-    await this.redis.srem(this.PROCESSING_KEY, messageId);
+    // Pas nécessaire avec MongoDB, le status gère ça
+    logger.debug(`Message ${messageId} removed from processing`);
   }
 
   public async getQueueLength(): Promise<number> {
-    return await this.redis.llen(this.QUEUE_KEY);
+    return await MessageModel.countDocuments({ status: 'pending' });
   }
 
-  public async getDeadLetterMessages(): Promise<Record<string, string>> {
-    return await this.redis.hgetall(this.DLQ_KEY);
+  public async getDeadLetterMessages(): Promise<any[]> {
+    return await MessageModel.find({ status: 'dead' }).lean();
   }
 
   public async healthCheck(): Promise<boolean> {
     try {
-      await this.redis.ping();
+       await MessageModel.countDocuments();
       return true;
     } catch (error) {
       return false;
+    }
+  }
+
+  public stopPolling(): void {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+      logger.info('Queue polling service stopped');
     }
   }
 }

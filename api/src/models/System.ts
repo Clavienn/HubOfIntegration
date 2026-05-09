@@ -62,13 +62,11 @@ const SystemSchema = new Schema<ISystem>(
   }
 );
 
+SystemSchema.index({ isActive: 1 }); // Seul index supplémentaire nécessaire
+
 // Virtual pour exposer 'id'
 SystemSchema.virtual('id').get(function(this: ISystem) {
   return this._id.toString();
 });
-
-SystemSchema.index({ apiKey: 1 });
-SystemSchema.index({ isActive: 1 });
-SystemSchema.index({ name: 1 });
 
 export const SystemModel = mongoose.model<ISystem>('System', SystemSchema);

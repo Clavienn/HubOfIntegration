@@ -64,7 +64,7 @@ export class SystemController {
   }
 
   public async getSystems(
-    req: Request,
+    _req: Request,
     res: Response
   ): Promise<void> {
     const systems = await SystemModel.find({}, { apiKey: 0 }); // Exclude API key

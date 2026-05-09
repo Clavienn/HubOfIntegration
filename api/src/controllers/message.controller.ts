@@ -130,7 +130,7 @@ export class MessageController {
   }
 
   public async getStatistics(
-    req: Request,
+    _req: Request,
     res: Response<StatisticsResponse>
   ): Promise<void> {
     const [

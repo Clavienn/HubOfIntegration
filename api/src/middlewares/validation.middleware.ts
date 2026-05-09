@@ -1,11 +1,11 @@
-// src/middleware/validation.middleware.ts
+// src/middlewares/validation.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import { IngestRequest } from '../types';
 import { AppError } from './error.middleware';
 
 export const validateIngestRequest = (
   req: Request<{}, {}, IngestRequest>,
-  res: Response,
+  _res: Response,  // Ajouter _ pour indiquer qu'il n'est pas utilisé
   next: NextFunction
 ): void => {
   const { payload } = req.body;
@@ -27,7 +27,7 @@ export const validateIngestRequest = (
 
 export const validateSystemConfig = (
   req: Request,
-  res: Response,
+  _res: Response,  // Ajouter _ pour indiquer qu'il n'est pas utilisé
   next: NextFunction
 ): void => {
   const { name, webhookUrl, retryPolicy, timeoutMs } = req.body;
@@ -60,12 +60,13 @@ export const validateSystemConfig = (
     throw new AppError('VALIDATION_ERROR', 'timeoutMs must be a number >= 1000', 400);
   }
 
+  // Supprimer l'envoi de réponse - les middlewares ne devraient pas envoyer de réponse
   next();
 };
 
 export const validateRoute = (
   req: Request,
-  res: Response,
+  _res: Response,  // Ajouter _ pour indiquer qu'il n'est pas utilisé
   next: NextFunction
 ): void => {
   const { sourceSystemId, destinationSystemId, name, condition, priority } = req.body;
@@ -90,5 +91,6 @@ export const validateRoute = (
     throw new AppError('VALIDATION_ERROR', 'Priority must be a number >= 0', 400);
   }
 
+  // Supprimer l'envoi de réponse - les middlewares ne devraient pas envoyer de réponse
   next();
 };
