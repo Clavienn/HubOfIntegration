@@ -1,11 +1,11 @@
+import SystemsPage from '@/app/systems/_components/List'
 import Layout from '@/components/layouts/Layout'
-import HomePage from '@/components/sections/Home'
 import React from 'react'
 
 function page() {
   return (
     <Layout>
-      <HomePage />
+        <SystemsPage />
     </Layout>
     
   )
