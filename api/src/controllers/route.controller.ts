@@ -13,14 +13,10 @@ export class RouteController {
    * Helper function to find a route by either id (UUID) or _id (MongoDB ObjectId)
    */
   private async findRouteById(routeId: string): Promise<any | null> {
-    // Si c'est un ObjectId MongoDB valide
     if (mongoose.Types.ObjectId.isValid(routeId)) {
-      // Chercher par _id
       const route = await RouteModel.findById(routeId);
       if (route) return route;
     }
-    
-    // Chercher par le champ id (UUID)
     return await RouteModel.findOne({ id: routeId });
   }
 
@@ -28,13 +24,10 @@ export class RouteController {
    * Helper function to find a system by either id (UUID) or _id (MongoDB ObjectId)
    */
   private async findSystemById(systemId: string): Promise<any | null> {
-    // Si c'est un ObjectId MongoDB valide
     if (mongoose.Types.ObjectId.isValid(systemId)) {
       const system = await SystemModel.findById(systemId);
       if (system) return system;
     }
-    
-    // Chercher par le champ id (UUID)
     return await SystemModel.findOne({ id: systemId });
   }
 
@@ -44,13 +37,11 @@ export class RouteController {
   ): Promise<void> {
     const { name, sourceSystemId, destinationSystemId, transformationId, condition, priority, isActive } = req.body;
 
-    // Verify source system exists
     const sourceSystem = await this.findSystemById(sourceSystemId);
     if (!sourceSystem) {
       throw new AppError('SOURCE_NOT_FOUND', `Source system ${sourceSystemId} not found`, 404);
     }
 
-    // Verify destination system exists
     const destinationSystem = await this.findSystemById(destinationSystemId);
     if (!destinationSystem) {
       throw new AppError('DESTINATION_NOT_FOUND', `Destination system ${destinationSystemId} not found`, 404);
@@ -71,25 +62,81 @@ export class RouteController {
 
     logger.info(`Route created: ${name} (${routeId}) from ${sourceSystem.name} to ${destinationSystem.name}`);
 
-    res.status(201).json(route);
+    // Retourner la route avec l'ID formaté
+    const routeObj = route.toObject();
+    res.status(201).json({
+      ...routeObj,
+      id: routeObj._id.toString(),
+    });
   }
 
   public async getRoutes(
-    req: Request<{}, {}, {}, { sourceSystemId?: string; destinationSystemId?: string }>,
+    req: Request<{}, {}, {}, { 
+      sourceSystemId?: string; 
+      destinationSystemId?: string;
+      isActive?: string;
+      search?: string;
+      page?: string;
+      limit?: string;
+    }>,
     res: Response
   ): Promise<void> {
+    const { 
+      sourceSystemId, 
+      destinationSystemId, 
+      isActive, 
+      search,
+      page = '1', 
+      limit = '10' 
+    } = req.query;
+
     const query: Record<string, unknown> = {};
     
-    if (req.query.sourceSystemId) {
-      query.sourceSystemId = req.query.sourceSystemId;
+    if (sourceSystemId) {
+      query.sourceSystemId = sourceSystemId;
     }
     
-    if (req.query.destinationSystemId) {
-      query.destinationSystemId = req.query.destinationSystemId;
+    if (destinationSystemId) {
+      query.destinationSystemId = destinationSystemId;
+    }
+    
+    if (isActive !== undefined) {
+      query.isActive = isActive === 'true';
     }
 
-    const routes = await RouteModel.find(query).sort({ priority: -1 });
-    res.json(routes);
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
+    }
+
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const [routes, total] = await Promise.all([
+      RouteModel.find(query)
+        .sort({ priority: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      RouteModel.countDocuments(query),
+    ]);
+
+    // Transformer les routes pour exposer l'ID correctement
+    const routesWithId = routes.map(route => ({
+      ...route,
+      id: route._id.toString(),
+    }));
+
+    console.log(`Retrieved ${routes.length} routes (total: ${total})`);
+
+    // ⚠️ CRUCIAL: Retourner la structure attendue par le frontend
+    res.json({
+      routes: routesWithId,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
+    });
   }
 
   public async getRouteById(
@@ -104,7 +151,11 @@ export class RouteController {
       throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
     }
 
-    res.json(route);
+    const routeObj = route.toObject();
+    res.json({
+      ...routeObj,
+      id: routeObj._id.toString(),
+    });
   }
 
   public async updateRoute(
@@ -130,7 +181,11 @@ export class RouteController {
 
     logger.info(`Route updated: ${route.name} (${id})`);
 
-    res.json(route);
+    const routeObj = route.toObject();
+    res.json({
+      ...routeObj,
+      id: routeObj._id.toString(),
+    });
   }
 
   public async deleteRoute(
@@ -167,7 +222,10 @@ export class RouteController {
     route.isActive = true;
     await route.save();
 
-    res.json({ id: route._id, isActive: true });
+    res.json({ 
+      id: route._id.toString(), 
+      isActive: true 
+    });
   }
 
   public async disableRoute(
@@ -185,6 +243,9 @@ export class RouteController {
     route.isActive = false;
     await route.save();
 
-    res.json({ id: route._id, isActive: false });
+    res.json({ 
+      id: route._id.toString(), 
+      isActive: false 
+    });
   }
 }

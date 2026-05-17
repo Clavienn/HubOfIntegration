@@ -12,8 +12,8 @@ export const API_ENDPOINTS = {
   // Routes
   ROUTES: '/v1/routes',
   ROUTE_BY_ID: (id: string) => `/v1/routes/${id}`,
-  ROUTE_ENABLE: (id: string) => `/v1/routes/${id}/enable`,
-  ROUTE_DISABLE: (id: string) => `/v1/routes/${id}/disable`,
+  ROUTE_ENABLE: (id: string) => `/v1/routes/action/${id}/enable`,
+  ROUTE_DISABLE: (id: string) => `/v1/routes/action/${id}/disable`,
 
   // Messages
   MESSAGES: '/v1/messages',
