@@ -1,7 +1,5 @@
 'use client';
-
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Dialog,
   DialogContent,
@@ -34,7 +32,6 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
     formState: { errors, isSubmitting },
     setError,
   } = useForm<CreateRoute>({
-    resolver: zodResolver(CreateRouteSchema),
     defaultValues: {
       name: '',
       sourceSystemId: '',
@@ -52,8 +49,17 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
   };
 
   const onSubmit = async (data: CreateRoute) => {
+    const result = CreateRouteSchema.safeParse(data);
+    if (!result.success) {
+      result.error.errors.forEach((err) => {
+        const field = err.path[0] as keyof CreateRoute;
+        setError(field, { message: err.message });
+      });
+      return;
+    }
+
     try {
-      const created = await createRoute(data);
+      const created = await createRoute(result.data);
       if (created) {
         reset();
         onSuccess?.();
@@ -77,7 +83,6 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
             Créez une nouvelle route d'intégration entre deux systèmes.
           </DialogDescription>
         </DialogHeader>
-
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-2">
           <RouteFormFields
             register={register}
@@ -86,13 +91,11 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
             systems={systems}
             isSubmitting={isSubmitting}
           />
-
           {errors.root && (
             <p className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200">
               {errors.root.message}
             </p>
           )}
-
           <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Annuler
