@@ -43,7 +43,7 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
 
   const isMounted = useRef(true);
   const limitRef = useRef(filters.limit);
-  limitRef.current = filters.limit;
+  // limitRef.current = filters.limit;
 
 
   const fetchRoutes = useCallback(async (filtersToApply?: RouteFilters) => {
@@ -54,7 +54,7 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
     const response = await routeRepo.getAll(filtersToApply ?? DEFAULT_FILTERS);
     if (!isMounted.current) return;
 
-    // ✅ L'API peut retourner un tableau OU un objet paginé
+
     const routeList = Array.isArray(response)
       ? response
       : (response.routes ?? []);
