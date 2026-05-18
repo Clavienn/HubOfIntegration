@@ -64,13 +64,13 @@ export class RouteRepoAPI implements RouteRepo {
     return response.data;
   }
 
-  async getBySourceSystem(sourceSystemId: string): Promise<Route[]> {
-    const response = await this.getAll({ sourceSystemId, limit: 100 });
+  async getBySourceSystem(): Promise<Route[]> {
+    const response = await this.getAll();
     return response.routes;
   }
 
-  async getByDestinationSystem(destinationSystemId: string): Promise<Route[]> {
-    const response = await this.getAll({ destinationSystemId, limit: 100 });
+  async getByDestinationSystem(): Promise<Route[]> {
+    const response = await this.getAll();
     return response.routes;
   }
 }
