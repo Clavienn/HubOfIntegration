@@ -104,9 +104,6 @@ export function Navbar({ className }: NavbarProps) {
 
           {/* Desktop Actions */}
           <div className="hidden md:flex md:items-center md:space-x-2">
-            <Button variant="default" size="sm">
-              New Message
-            </Button>
           </div>
 
           {/* Mobile Menu Button */}

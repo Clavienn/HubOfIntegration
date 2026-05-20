@@ -23,10 +23,12 @@ export const API_ENDPOINTS = {
   DEAD_LETTER: '/v1/dead-letter',
 
   // Stats
-  STATISTICS: '/v1/statistics',
+  STATISTICS: '/v1/messages/statistics',
 
   // Ingest
   INGEST: '/v1/ingest',
 } as const;
+
+
 
 export type ApiEndpoint = typeof API_ENDPOINTS[keyof typeof API_ENDPOINTS];

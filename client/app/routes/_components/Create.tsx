@@ -1,17 +1,11 @@
 'use client';
-
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { useRoutes } from '@/hooks/useRoute';
+import { useRoutes } from '@/hooks/useRoute';  // ✅ Correction: useRoutes (pluriel)
 import { useSystems } from '@/hooks/useSystem';
 import { CreateRoute, CreateRouteSchema } from '@/domains/models/Route';
 import { RouteFormFields } from './FormFields';
@@ -24,17 +18,13 @@ interface CreateRouteModalProps {
 
 export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalProps) {
   const { createRoute } = useRoutes();
-  const { systems = [] } = useSystems({ limit: 100 });
+  const { systems, loading: systemsLoading } = useSystems({ limit: 100 });
 
   const {
-    register,
-    handleSubmit,
-    control,
-    reset,
+    register, handleSubmit, control, reset,
     formState: { errors, isSubmitting },
     setError,
   } = useForm<CreateRoute>({
-    resolver: zodResolver(CreateRouteSchema),
     defaultValues: {
       name: '',
       sourceSystemId: '',
@@ -52,8 +42,16 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
   };
 
   const onSubmit = async (data: CreateRoute) => {
+    const result = CreateRouteSchema.safeParse(data);
+    if (!result.success) {
+      result.error.errors.forEach((err) => {
+        const field = err.path[0] as keyof CreateRoute;
+        setError(field, { message: err.message });
+      });
+      return;
+    }
     try {
-      const created = await createRoute(data);
+      const created = await createRoute(result.data);
       if (created) {
         reset();
         onSuccess?.();
@@ -74,7 +72,7 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
         <DialogHeader>
           <DialogTitle>Nouvelle route</DialogTitle>
           <DialogDescription>
-            Créez une nouvelle route d'intégration entre deux systèmes.
+            Créez une nouvelle route d&apos;intégration entre deux systèmes.
           </DialogDescription>
         </DialogHeader>
 
@@ -84,20 +82,19 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
             errors={errors}
             control={control}
             systems={systems}
+            systemsLoading={systemsLoading}
             isSubmitting={isSubmitting}
           />
-
           {errors.root && (
             <p className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200">
               {errors.root.message}
             </p>
           )}
-
           <DialogFooter className="pt-2">
             <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Annuler
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || systemsLoading}>
               {isSubmitting ? 'Création...' : 'Créer la route'}
             </Button>
           </DialogFooter>

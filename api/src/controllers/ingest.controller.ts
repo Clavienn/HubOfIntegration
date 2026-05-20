@@ -42,7 +42,7 @@ export class IngestController {
     const { payload, destinationSystemId, correlationId }: IngestRequest = req.body;
     
     // Utiliser l'ID du système depuis l'authentification
-    const sourceSystemId = req.systemId;
+    const sourceSystemId =  req.body.sourceSystemId;
     
     if (!sourceSystemId) {
       throw new AppError('UNAUTHORIZED', 'Source system not identified', 401);

@@ -27,10 +27,7 @@ export class RouteRepoAPI implements RouteRepo {
       page: filters?.page ?? 1,
       limit: filters?.limit ?? 10,
     },
-  });
-
-  console.log("ROUTE :",response.data);
-  
+  });  
 
   return response.data;
 }
@@ -42,6 +39,9 @@ export class RouteRepoAPI implements RouteRepo {
 
   async create(data: CreateRoute): Promise<Route> {
     const response = await httpClient.post<Route>(API_ENDPOINTS.ROUTES, data);
+
+    console.log(response);
+    
     return response.data;
   }
 
