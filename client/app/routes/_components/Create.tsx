@@ -1,15 +1,11 @@
 'use client';
 import { useForm } from 'react-hook-form';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { useRoutes } from '@/hooks/useRoute';
+import { useRoutes } from '@/hooks/useRoute';  // ✅ Correction: useRoutes (pluriel)
 import { useSystems } from '@/hooks/useSystem';
 import { CreateRoute, CreateRouteSchema } from '@/domains/models/Route';
 import { RouteFormFields } from './FormFields';
@@ -22,13 +18,10 @@ interface CreateRouteModalProps {
 
 export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalProps) {
   const { createRoute } = useRoutes();
-  const { systems = [] } = useSystems({ limit: 100 });
+  const { systems, loading: systemsLoading } = useSystems({ limit: 100 });
 
   const {
-    register,
-    handleSubmit,
-    control,
-    reset,
+    register, handleSubmit, control, reset,
     formState: { errors, isSubmitting },
     setError,
   } = useForm<CreateRoute>({
@@ -57,7 +50,6 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
       });
       return;
     }
-
     try {
       const created = await createRoute(result.data);
       if (created) {
@@ -80,15 +72,17 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
         <DialogHeader>
           <DialogTitle>Nouvelle route</DialogTitle>
           <DialogDescription>
-            Créez une nouvelle route d'intégration entre deux systèmes.
+            Créez une nouvelle route d&apos;intégration entre deux systèmes.
           </DialogDescription>
         </DialogHeader>
+
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-2">
           <RouteFormFields
             register={register}
             errors={errors}
             control={control}
             systems={systems}
+            systemsLoading={systemsLoading}
             isSubmitting={isSubmitting}
           />
           {errors.root && (
@@ -100,7 +94,7 @@ export function CreateRouteModal({ open, onClose, onSuccess }: CreateRouteModalP
             <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
               Annuler
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || systemsLoading}>
               {isSubmitting ? 'Création...' : 'Créer la route'}
             </Button>
           </DialogFooter>

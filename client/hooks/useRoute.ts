@@ -1,3 +1,4 @@
+// hooks/useRoutes.ts
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { routeRepo } from '@/infrastructures/repository/RouteRepoAPI';
 import { Route, CreateRoute, UpdateRoute, RouteFilters } from '@/domains/models/Route';
@@ -32,50 +33,41 @@ const DEFAULT_FILTERS: RouteFilters = {
 
 export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesReturn {
   const [routes, setRoutes] = useState<Route[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [total, setTotal] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
+  const [total, setTotal] = useState<number>(0);
+  const [totalPages, setTotalPages] = useState<number>(0);
   const [filters, setFiltersState] = useState<RouteFilters>({
     ...DEFAULT_FILTERS,
     ...initialFilters,
   });
 
-  const isMounted = useRef(true);
-  const limitRef = useRef(filters.limit);
-  // limitRef.current = filters.limit;
-
+  const isMounted = useRef<boolean>(true);
+  const initialFetchDone = useRef<boolean>(false);
 
   const fetchRoutes = useCallback(async (filtersToApply?: RouteFilters) => {
-  if (!isMounted.current) return;
-  setLoading(true);
-  setError(null);
-  try {
-    const response = await routeRepo.getAll(filtersToApply ?? DEFAULT_FILTERS);
     if (!isMounted.current) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await routeRepo.getAll(filtersToApply ?? filters);
+      if (!isMounted.current) return;
 
+      const routeList = response?.routes ?? [];
+      const totalCount = response?.total ?? 0;
+      const pages = response?.totalPages ?? Math.ceil(totalCount / (filtersToApply?.limit ?? filters.limit));
 
-    const routeList = Array.isArray(response)
-      ? response
-      : (response.routes ?? []);
-    const totalCount = Array.isArray(response)
-      ? response.length
-      : (response.total ?? 0);
-    const pages = Array.isArray(response)
-      ? 1
-      : (response.totalPages ?? Math.ceil(totalCount / (filtersToApply?.limit ?? 10)));
-
-    setRoutes(routeList);
-    setTotal(totalCount);
-    setTotalPages(pages);
-  } catch (err) {
-    if (!isMounted.current) return;
-    setError(err instanceof Error ? err.message : 'Erreur lors du chargement des routes');
-    setRoutes([]);
-  } finally {
-    if (isMounted.current) setLoading(false);
-  }
-}, []);
+      setRoutes(routeList);
+      setTotal(totalCount);
+      setTotalPages(pages);
+    } catch (err) {
+      if (!isMounted.current) return;
+      setError(err instanceof Error ? err.message : 'Erreur lors du chargement des routes');
+      setRoutes([]);
+    } finally {
+      if (isMounted.current) setLoading(false);
+    }
+  }, [filters]);
 
   const getRoute = useCallback(async (id: string): Promise<Route | null> => {
     if (!isMounted.current) return null;
@@ -100,11 +92,8 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
       const newRoute = await routeRepo.create(data);
       if (isMounted.current && newRoute) {
         setRoutes((prev) => [newRoute, ...prev]);
-        setTotal((prev) => {
-          const next = prev + 1;
-          setTotalPages(Math.ceil(next / limitRef.current));
-          return next;
-        });
+        setTotal((prev) => prev + 1);
+        setTotalPages(Math.ceil((total + 1) / filters.limit));
       }
       return newRoute;
     } catch (err) {
@@ -114,7 +103,7 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  }, []);
+  }, [filters.limit, total]);
 
   const updateRoute = useCallback(async (id: string, data: UpdateRoute): Promise<Route | null> => {
     if (!isMounted.current) return null;
@@ -142,11 +131,8 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
       await routeRepo.delete(id);
       if (isMounted.current) {
         setRoutes((prev) => prev.filter((r) => r.id !== id));
-        setTotal((prev) => {
-          const next = Math.max(0, prev - 1);
-          setTotalPages(Math.ceil(next / limitRef.current));
-          return next;
-        });
+        setTotal((prev) => Math.max(0, prev - 1));
+        setTotalPages(Math.ceil((total - 1) / filters.limit));
       }
       return true;
     } catch (err) {
@@ -156,7 +142,7 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
     } finally {
       if (isMounted.current) setLoading(false);
     }
-  }, []);
+  }, [filters.limit, total]);
 
   const enableRoute = useCallback(async (id: string): Promise<Route | null> => {
     if (!isMounted.current) return null;
@@ -206,17 +192,21 @@ export function useRoutes(initialFilters?: Partial<RouteFilters>): UseRoutesRetu
     setFiltersState(DEFAULT_FILTERS);
   }, []);
 
-  // ✅ fetchRoutes stable (deps []) → cet effect ne boucle pas
-  // filters passé directement en argument → zéro stale, zéro ref intermédiaire
   useEffect(() => {
-    fetchRoutes(filters);
+    if (initialFetchDone.current) {
+      fetchRoutes();
+    }
   }, [filters, fetchRoutes]);
 
   useEffect(() => {
+    if (!initialFetchDone.current) {
+      initialFetchDone.current = true;
+      fetchRoutes();
+    }
     return () => {
       isMounted.current = false;
     };
-  }, []);
+  }, [fetchRoutes]);
 
   return {
     routes,

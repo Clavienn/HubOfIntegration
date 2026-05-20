@@ -2,12 +2,8 @@
 import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
+  Dialog, DialogContent, DialogHeader,
+  DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { useRoutes } from '@/hooks/useRoute';
@@ -24,13 +20,11 @@ interface UpdateRouteModalProps {
 
 export function UpdateRouteModal({ open, route, onClose, onSuccess }: UpdateRouteModalProps) {
   const { updateRoute } = useRoutes();
-  const { systems = [] } = useSystems({ limit: 100 });
+  // ✅ Récupérer loading
+  const { systems, loading: systemsLoading } = useSystems({ limit: 100 });
 
   const {
-    register,
-    handleSubmit,
-    control,
-    reset,
+    register, handleSubmit, control, reset,
     formState: { errors, isSubmitting },
     setError,
   } = useForm<CreateRoute>({
@@ -66,7 +60,6 @@ export function UpdateRouteModal({ open, route, onClose, onSuccess }: UpdateRout
 
   const onSubmit = async (data: CreateRoute) => {
     if (!route?.id) return;
-
     const result = CreateRouteSchema.safeParse(data);
     if (!result.success) {
       result.error.errors.forEach((err) => {
@@ -75,7 +68,6 @@ export function UpdateRouteModal({ open, route, onClose, onSuccess }: UpdateRout
       });
       return;
     }
-
     try {
       const updated = await updateRoute(route.id, result.data);
       if (updated) {
@@ -100,28 +92,36 @@ export function UpdateRouteModal({ open, route, onClose, onSuccess }: UpdateRout
             Modifiez les paramètres de la route{route ? ` "${route.name}"` : ''}.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-2">
-          <RouteFormFields
-            register={register}
-            errors={errors}
-            control={control}
-            systems={systems}
-            isSubmitting={isSubmitting}
-          />
-          {errors.root && (
-            <p className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200">
-              {errors.root.message}
-            </p>
-          )}
-          <DialogFooter className="pt-2">
-            <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
-              Annuler
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Enregistrement...' : 'Enregistrer'}
-            </Button>
-          </DialogFooter>
-        </form>
+
+        {/* ✅ Attendre que les systèmes soient chargés */}
+        {systemsLoading ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            Chargement des systèmes...
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-2">
+            <RouteFormFields
+              register={register}
+              errors={errors}
+              control={control}
+              systems={systems}
+              isSubmitting={isSubmitting}
+            />
+            {errors.root && (
+              <p className="text-sm text-red-600 bg-red-50 p-3 rounded border border-red-200">
+                {errors.root.message}
+              </p>
+            )}
+            <DialogFooter className="pt-2">
+              <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
+                Annuler
+              </Button>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

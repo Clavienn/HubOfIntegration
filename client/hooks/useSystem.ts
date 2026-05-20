@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { systemRepo } from '@/infrastructures/repository/SystemRepoAPI';
 import {
   System,
@@ -38,196 +38,178 @@ const DEFAULT_FILTERS: SystemFilters = {
 };
 
 export function useSystems(initialFilters?: Partial<SystemFilters>): UseSystemsReturn {
+  const stableInitialFilters = useMemo(
+    () => ({ ...DEFAULT_FILTERS, ...initialFilters }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const [systems, setSystems] = useState<System[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
-  const [filters, setFiltersState] = useState<SystemFilters>({
-    ...DEFAULT_FILTERS,
-    ...initialFilters,
-  });
+  const [filters, setFiltersState] = useState<SystemFilters>(stableInitialFilters);
 
-  const isMounted = useRef(true);
-  // ✅ Garde la limite courante accessible dans les callbacks sans dépendance
   const limitRef = useRef(filters.limit);
   limitRef.current = filters.limit;
 
-  // ✅ fetchSystems accepte les filtres en paramètre obligatoire depuis l'effet
-  // → jamais de capture stale, pas de ref sur filters
   const fetchSystems = useCallback(async (filtersToApply?: SystemFilters) => {
-    if (!isMounted.current) return;
     setLoading(true);
     setError(null);
     try {
       const response = await systemRepo.getAll(filtersToApply ?? DEFAULT_FILTERS);
-      if (!isMounted.current) return;
       setSystems(response.systems ?? []);
       setTotal(response.total ?? 0);
       setTotalPages(
-        response.totalPages ?? Math.ceil((response.total ?? 0) / (filtersToApply?.limit ?? 10))
+        response.totalPages ??
+          Math.ceil((response.total ?? 0) / (filtersToApply?.limit ?? 10))
       );
     } catch (err) {
-      if (!isMounted.current) return;
-      setError(err instanceof Error ? err.message : 'Erreur lors du chargement des systèmes');
+      setError(
+        err instanceof Error ? err.message : 'Erreur lors du chargement des systèmes'
+      );
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
-  }, []); // ✅ deps vides → stable, jamais recréée
+  }, []);
 
   const getSystem = useCallback(async (id: string): Promise<System | null> => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       return await systemRepo.getById(id);
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Système non trouvé');
+      setError(err instanceof Error ? err.message : 'Système non trouvé');
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const createSystem = useCallback(async (data: CreateSystem): Promise<System | null> => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       const newSystem = await systemRepo.create(data);
-      if (isMounted.current && newSystem) {
+      if (newSystem) {
         setSystems((prev) => [newSystem, ...prev]);
         setTotal((prev) => {
           const next = prev + 1;
-          // ✅ limitRef.current : valeur fraîche sans capturer filters
           setTotalPages(Math.ceil(next / limitRef.current));
           return next;
         });
       }
       return newSystem;
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Erreur lors de la création');
+      setError(err instanceof Error ? err.message : 'Erreur lors de la création');
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const updateSystem = useCallback(
     async (id: string, data: UpdateSystem): Promise<System | null> => {
-      if (!isMounted.current) return null;
       setLoading(true);
       setError(null);
       try {
         const updated = await systemRepo.update(id, data);
-        if (isMounted.current && updated)
+        if (updated)
           setSystems((prev) => prev.map((s) => (s.id === id ? updated : s)));
         return updated;
       } catch (err) {
-        if (isMounted.current)
-          setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour');
+        setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour');
         return null;
       } finally {
-        if (isMounted.current) setLoading(false);
+        setLoading(false);
       }
     },
     []
   );
 
   const deleteSystem = useCallback(async (id: string): Promise<boolean> => {
-    if (!isMounted.current) return false;
     setLoading(true);
     setError(null);
     try {
       await systemRepo.delete(id);
-      if (isMounted.current) {
-        setSystems((prev) => prev.filter((s) => s.id !== id));
-        setTotal((prev) => {
-          const next = Math.max(0, prev - 1);
-          setTotalPages(Math.ceil(next / limitRef.current));
-          return next;
-        });
-      }
+      setSystems((prev) => prev.filter((s) => s.id !== id));
+      setTotal((prev) => {
+        const next = Math.max(0, prev - 1);
+        setTotalPages(Math.ceil(next / limitRef.current));
+        return next;
+      });
       return true;
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Erreur lors de la suppression');
+      setError(err instanceof Error ? err.message : 'Erreur lors de la suppression');
       return false;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const enableSystem = useCallback(async (id: string): Promise<System | null> => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       const updated = await systemRepo.enable(id);
-      if (isMounted.current && updated)
+      if (updated)
         setSystems((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : "Erreur lors de l'activation");
+      setError(err instanceof Error ? err.message : "Erreur lors de l'activation");
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const disableSystem = useCallback(async (id: string): Promise<System | null> => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       const updated = await systemRepo.disable(id);
-      if (isMounted.current && updated)
+      if (updated)
         setSystems((prev) => prev.map((s) => (s.id === id ? updated : s)));
       return updated;
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Erreur lors de la désactivation');
+      setError(err instanceof Error ? err.message : 'Erreur lors de la désactivation');
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const rotateApiKey = useCallback(async (id: string): Promise<string | null> => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       const result = await systemRepo.rotateApiKey(id);
-      if (isMounted.current && result.apiKey)
+      if (result.apiKey)
         setSystems((prev) =>
           prev.map((s) => (s.id === id ? { ...s, apiKey: result.apiKey } : s))
         );
       return result.apiKey;
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Erreur lors de la rotation de la clé');
+      setError(
+        err instanceof Error ? err.message : 'Erreur lors de la rotation de la clé'
+      );
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
   const testWebhook = useCallback(async (id: string) => {
-    if (!isMounted.current) return null;
     setLoading(true);
     setError(null);
     try {
       return await systemRepo.testWebhook(id);
     } catch (err) {
-      if (isMounted.current)
-        setError(err instanceof Error ? err.message : 'Erreur lors du test');
+      setError(err instanceof Error ? err.message : 'Erreur lors du test');
       return null;
     } finally {
-      if (isMounted.current) setLoading(false);
+      setLoading(false);
     }
   }, []);
 
@@ -243,20 +225,12 @@ export function useSystems(initialFilters?: Partial<SystemFilters>): UseSystemsR
     setFiltersState(DEFAULT_FILTERS);
   }, []);
 
-  // ✅ filters passé directement à fetchSystems → zéro ref, zéro stale, zéro cascade
-  // fetchSystems est stable (deps []) donc l'effet ne boucle pas
   useEffect(() => {
     fetchSystems(filters);
   }, [filters, fetchSystems]);
 
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-    };
-  }, []);
-
   return {
-    systems,       // ✅ toujours un tableau, jamais undefined
+    systems,
     loading,
     error,
     total,

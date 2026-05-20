@@ -18,10 +18,7 @@ export class SystemRepoAPI implements SystemRepo {
     const response = await httpClient.get<unknown>(
       API_ENDPOINTS.SYSTEMS,
       { params }
-    );
-
-    console.log(response.data);
-    
+    );    
 
     const parsed = SystemsListResponseSchema.parse(response.data);
     return parsed;
@@ -31,7 +28,7 @@ export class SystemRepoAPI implements SystemRepo {
     const response = await httpClient.get<unknown>(
       API_ENDPOINTS.SYSTEM_BY_ID(id)
     );
-    // ✅ Parse individuel
+
     return SystemSchema.parse(response.data);
   }
 
