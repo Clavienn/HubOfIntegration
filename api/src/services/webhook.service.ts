@@ -11,30 +11,34 @@ export class WebhookService {
   private constructor() {
     this.httpClient = axios.create({
       timeout: 10000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   public static getInstance(): WebhookService {
-    if (!WebhookService.instance) {
-      WebhookService.instance = new WebhookService();
-    }
+    if (!WebhookService.instance) WebhookService.instance = new WebhookService();
     return WebhookService.instance;
   }
 
+  // ── Send ───────────────────────────────────────────────────────────────────
+  // FIX: findById(systemId) — System n'a pas de champ id, seulement _id + virtual
+
   public async sendWebhook(
-    systemId: string,
+    systemId:  string,
     eventType: WebhookPayload['eventType'],
     messageId: string,
-    payload?: MessagePayload,
-    error?: string
+    payload?:  MessagePayload,
+    error?:    string,
   ): Promise<void> {
     try {
-      const system = await SystemModel.findOne({ id: systemId, isActive: true });
-      
-      if (!system?.webhookUrl) {
+      const system = await SystemModel.findById(systemId);
+
+      if (!system?.isActive) {
+        logger.debug(`System ${systemId} inactive or not found — skipping webhook`);
+        return;
+      }
+
+      if (!system.webhookUrl) {
         logger.debug(`No webhook URL configured for system ${systemId}`);
         return;
       }
@@ -49,36 +53,30 @@ export class WebhookService {
       };
 
       await this.httpClient.post(system.webhookUrl, webhookPayload);
-      logger.info(`Webhook sent to ${systemId} for event ${eventType}`);
+      logger.info(`Webhook sent to ${system.name} (${systemId}) for event ${eventType}`);
 
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        logger.error(`Webhook failed for ${systemId}: ${error.message}`);
+    } catch (err) {
+      // Ne jamais faire remonter — un échec webhook ne doit pas bloquer le message
+      if (err instanceof AxiosError) {
+        logger.error(`Webhook failed for ${systemId}: ${err.message}`);
       } else {
-        logger.error(`Webhook failed for ${systemId}:`, error);
+        logger.error(`Webhook failed for ${systemId}:`, err);
       }
-      // Don't throw - webhook failures shouldn't break the main flow
     }
   }
+
+  // ── Test ───────────────────────────────────────────────────────────────────
 
   public async testWebhook(webhookUrl: string): Promise<{ success: boolean; message: string }> {
     try {
       await this.httpClient.post(webhookUrl, {
-        test: true,
+        test:      true,
         timestamp: new Date().toISOString(),
       });
       return { success: true, message: 'Webhook test successful' };
-    } catch (error) {
-      if (error instanceof AxiosError) {
-        return { 
-          success: false, 
-          message: `Webhook test failed: ${error.message}` 
-        };
-      }
-      return { 
-        success: false, 
-        message: 'Webhook test failed: Unknown error' 
-      };
+    } catch (err) {
+      const msg = err instanceof AxiosError ? err.message : 'Unknown error';
+      return { success: false, message: `Webhook test failed: ${msg}` };
     }
   }
 }

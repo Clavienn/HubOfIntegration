@@ -1,8 +1,7 @@
 // src/controllers/route.controller.ts
 import { Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
 import mongoose from 'mongoose';
-import { RouteModel } from '../models/Route';
+import { RouteModel } from '../models/Routage';
 import { SystemModel } from '../models/System';
 import { AppError } from '../middlewares/error.middleware';
 import { Route } from '../types';
@@ -10,26 +9,27 @@ import logger from '../utils/logger';
 
 export class RouteController {
   /**
-   * Helper function to find a route by either id (UUID) or _id (MongoDB ObjectId)
+   * Trouve un système par _id (ObjectId) OU par son virtual id (= _id.toString()).
+   * Le System n'a plus de champ uuid séparé — son id est toujours _id.toString().
    */
-  private async findRouteById(routeId: string): Promise<any | null> {
-    if (mongoose.Types.ObjectId.isValid(routeId)) {
-      const route = await RouteModel.findById(routeId);
-      if (route) return route;
-    }
-    return await RouteModel.findOne({ id: routeId });
-  }
-
-  /**
-   * Helper function to find a system by either id (UUID) or _id (MongoDB ObjectId)
-   */
-  private async findSystemById(systemId: string): Promise<any | null> {
+  private async findSystemById(systemId: string) {
     if (mongoose.Types.ObjectId.isValid(systemId)) {
       const system = await SystemModel.findById(systemId);
       if (system) return system;
     }
-    return await SystemModel.findOne({ id: systemId });
+    // Fallback: le frontend peut envoyer l'id stringifié
+    return SystemModel.findOne({ _id: systemId });
   }
+
+  private async findRouteById(routeId: string) {
+    if (mongoose.Types.ObjectId.isValid(routeId)) {
+      const route = await RouteModel.findById(routeId);
+      if (route) return route;
+    }
+    return null; // Route n'a pas d'uuid séparé — seul _id est utilisé
+  }
+
+  // ─── Create ────────────────────────────────────────────────────────────────
 
   public async createRoute(
     req: Request<{}, {}, Omit<Route, 'id' | 'createdAt' | 'updatedAt'>>,
@@ -47,32 +47,27 @@ export class RouteController {
       throw new AppError('DESTINATION_NOT_FOUND', `Destination system ${destinationSystemId} not found`, 404);
     }
 
-    const routeId = uuidv4();
-
+    // FIX: on stocke les _id MongoDB (string) — plus de UUID séparé pour Route
     const route = await RouteModel.create({
-      id: routeId,
       name,
-      sourceSystemId: sourceSystem._id.toString(),
+      sourceSystemId:      sourceSystem._id.toString(),
       destinationSystemId: destinationSystem._id.toString(),
       transformationId,
       condition,
-      priority: priority || 0,
-      isActive: isActive ?? true,
+      priority:  priority ?? 0,
+      isActive:  isActive ?? true,
     });
 
-    logger.info(`Route created: ${name} (${routeId}) from ${sourceSystem.name} to ${destinationSystem.name}`);
+    logger.info(`Route created: ${name} (${route._id}) from ${sourceSystem.name} to ${destinationSystem.name}`);
 
-    // Retourner la route avec l'ID formaté
-    const routeObj = route.toObject();
-    res.status(201).json({
-      ...routeObj,
-      id: routeObj._id.toString(),
-    });
+    res.status(201).json(route.toObject());
   }
 
+  // ─── List ──────────────────────────────────────────────────────────────────
+
   public async getRoutes(
-    req: Request<{}, {}, {}, { 
-      sourceSystemId?: string; 
+    req: Request<{}, {}, {}, {
+      sourceSystemId?: string;
       destinationSystemId?: string;
       isActive?: string;
       search?: string;
@@ -81,57 +76,25 @@ export class RouteController {
     }>,
     res: Response
   ): Promise<void> {
-    const { 
-      sourceSystemId, 
-      destinationSystemId, 
-      isActive, 
-      search,
-      page = '1', 
-      limit = '10' 
-    } = req.query;
+    const { sourceSystemId, destinationSystemId, isActive, search, page = '1', limit = '10' } = req.query;
 
     const query: Record<string, unknown> = {};
-    
-    if (sourceSystemId) {
-      query.sourceSystemId = sourceSystemId;
-    }
-    
-    if (destinationSystemId) {
-      query.destinationSystemId = destinationSystemId;
-    }
-    
-    if (isActive !== undefined) {
-      query.isActive = isActive === 'true';
-    }
+    if (sourceSystemId)      query.sourceSystemId = sourceSystemId;
+    if (destinationSystemId) query.destinationSystemId = destinationSystemId;
+    if (isActive !== undefined) query.isActive = isActive === 'true';
+    if (search) query.name = { $regex: search, $options: 'i' };
 
-    if (search) {
-      query.name = { $regex: search, $options: 'i' };
-    }
-
-    const pageNum = parseInt(page, 10);
-    const limitNum = parseInt(limit, 10);
+    const pageNum  = Math.max(1, parseInt(page, 10));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10)));
     const skip = (pageNum - 1) * limitNum;
 
     const [routes, total] = await Promise.all([
-      RouteModel.find(query)
-        .sort({ priority: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .lean(),
+      RouteModel.find(query).sort({ priority: -1, createdAt: -1 }).skip(skip).limit(limitNum).lean(),
       RouteModel.countDocuments(query),
     ]);
 
-    // Transformer les routes pour exposer l'ID correctement
-    const routesWithId = routes.map(route => ({
-      ...route,
-      id: route._id.toString(),
-    }));
-
-    console.log(`Retrieved ${routes.length} routes (total: ${total})`);
-
-    // ⚠️ CRUCIAL: Retourner la structure attendue par le frontend
     res.json({
-      routes: routesWithId,
+      routes: routes.map(r => ({ ...r, id: r._id.toString() })),
       total,
       page: pageNum,
       limit: limitNum,
@@ -139,113 +102,57 @@ export class RouteController {
     });
   }
 
-  public async getRouteById(
-    req: Request<{ id: string }>,
-    res: Response
-  ): Promise<void> {
-    const { id } = req.params;
+  // ─── Get by ID ─────────────────────────────────────────────────────────────
 
-    const route = await this.findRouteById(id);
-
-    if (!route) {
-      throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
-    }
-
-    const routeObj = route.toObject();
-    res.json({
-      ...routeObj,
-      id: routeObj._id.toString(),
-    });
+  public async getRouteById(req: Request<{ id: string }>, res: Response): Promise<void> {
+    const route = await this.findRouteById(req.params.id);
+    if (!route) throw new AppError('ROUTE_NOT_FOUND', `Route ${req.params.id} not found`, 404);
+    res.json(route.toObject());
   }
 
-  public async updateRoute(
-    req: Request<{ id: string }>,
-    res: Response
-  ): Promise<void> {
-    const { id } = req.params;
+  // ─── Update ────────────────────────────────────────────────────────────────
+
+  public async updateRoute(req: Request<{ id: string }>, res: Response): Promise<void> {
+    const route = await this.findRouteById(req.params.id);
+    if (!route) throw new AppError('ROUTE_NOT_FOUND', `Route ${req.params.id} not found`, 404);
+
     const { name, transformationId, condition, priority, isActive } = req.body;
-
-    const route = await this.findRouteById(id);
-
-    if (!route) {
-      throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
-    }
-
-    if (name) route.name = name;
-    if (transformationId !== undefined) route.transformationId = transformationId;
-    if (condition !== undefined) route.condition = condition;
-    if (priority !== undefined) route.priority = priority;
-    if (isActive !== undefined) route.isActive = isActive;
+    if (name              !== undefined) route.name             = name;
+    if (transformationId  !== undefined) route.transformationId = transformationId;
+    if (condition         !== undefined) route.condition        = condition;
+    if (priority          !== undefined) route.priority         = priority;
+    if (isActive          !== undefined) route.isActive         = isActive;
 
     await route.save();
-
-    logger.info(`Route updated: ${route.name} (${id})`);
-
-    const routeObj = route.toObject();
-    res.json({
-      ...routeObj,
-      id: routeObj._id.toString(),
-    });
+    logger.info(`Route updated: ${route.name} (${route._id})`);
+    res.json(route.toObject());
   }
 
-  public async deleteRoute(
-    req: Request<{ id: string }>,
-    res: Response
-  ): Promise<void> {
-    const { id } = req.params;
+  // ─── Delete ────────────────────────────────────────────────────────────────
 
-    const route = await this.findRouteById(id);
-
-    if (!route) {
-      throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
-    }
-
+  public async deleteRoute(req: Request<{ id: string }>, res: Response): Promise<void> {
+    const route = await this.findRouteById(req.params.id);
+    if (!route) throw new AppError('ROUTE_NOT_FOUND', `Route ${req.params.id} not found`, 404);
     await route.deleteOne();
-
-    logger.info(`Route deleted: ${route.name} (${id})`);
-
+    logger.info(`Route deleted: ${route.name} (${route._id})`);
     res.status(204).send();
   }
 
-  public async enableRoute(
-    req: Request<{ id: string }>,
-    res: Response
-  ): Promise<void> {
-    const { id } = req.params;
+  // ─── Enable / Disable ──────────────────────────────────────────────────────
 
-    const route = await this.findRouteById(id);
-
-    if (!route) {
-      throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
-    }
-
+  public async enableRoute(req: Request<{ id: string }>, res: Response): Promise<void> {
+    const route = await this.findRouteById(req.params.id);
+    if (!route) throw new AppError('ROUTE_NOT_FOUND', `Route ${req.params.id} not found`, 404);
     route.isActive = true;
     await route.save();
-
-    res.json({ 
-      id: route._id.toString(), 
-      isActive: true 
-    });
+    res.json({ id: route._id.toString(), isActive: true });
   }
 
-  public async disableRoute(
-    req: Request<{ id: string }>,
-    res: Response
-  ): Promise<void> {
-    const { id } = req.params;
-
-    const route = await this.findRouteById(id);
-
-    if (!route) {
-      throw new AppError('ROUTE_NOT_FOUND', `Route ${id} not found`, 404);
-    }
-
+  public async disableRoute(req: Request<{ id: string }>, res: Response): Promise<void> {
+    const route = await this.findRouteById(req.params.id);
+    if (!route) throw new AppError('ROUTE_NOT_FOUND', `Route ${req.params.id} not found`, 404);
     route.isActive = false;
     await route.save();
-
-    res.json({ 
-      id: route._id.toString(), 
-      isActive: false 
-    });
+    res.json({ id: route._id.toString(), isActive: false });
   }
 }
