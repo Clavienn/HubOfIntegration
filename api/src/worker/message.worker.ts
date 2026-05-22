@@ -131,7 +131,7 @@ class MessageWorker {
     sourceSystemId: string,
     destinationSystemId: string
   ): Promise<any> {
-    const { RouteModel } = await import('../models/Route');
+    const { RouteModel } = await import('../models/Routage');
     return await RouteModel.findOne({
       sourceSystemId,
       destinationSystemId,
