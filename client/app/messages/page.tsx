@@ -5,7 +5,7 @@ import MessagesPage from './_components/List'
 function page() {
   return (
     <Layout>
-        <MessagesPage />
+      <MessagesPage />
     </Layout>
   )
 }

@@ -17,8 +17,8 @@ interface NavItem {
 const navItems: NavItem[] = [
   {
     href: '/',
-    label: 'Dashboard',
-    icon: <LayoutDashboard className="h-4 w-4" />,
+    label: 'Accueil',
+    icon: '',
   },
   {
     href: '/routes',
@@ -32,12 +32,12 @@ const navItems: NavItem[] = [
   },
   {
     href: '/systems',
-    label: 'Systems',
+    label: 'Systèmes',
     icon: <Database className="h-4 w-4" />,
   },
   {
     href: '/settings',
-    label: 'Settings',
+    label: 'Paramètres',
     icon: <Settings className="h-4 w-4" />,
   },
 ];
@@ -104,6 +104,9 @@ export function Navbar({ className }: NavbarProps) {
 
           {/* Desktop Actions */}
           <div className="hidden md:flex md:items-center md:space-x-2">
+            <Button variant="default" size="sm" className="w-full">
+              <Link href="/messages/message">Nouvel message</Link>
+            </Button>
           </div>
 
           {/* Mobile Menu Button */}
